@@ -83,6 +83,32 @@ API_BASE_URL = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
 
+def get_title_from_session_data(session_data, max_length=200):
+    """Extract a title from session data dict.
+
+    Checks for a top-level 'title' field first, then falls back to
+    the first user message in loglines.
+    Returns a title string or None if none found.
+    """
+    title = session_data.get("title")
+    if title:
+        if len(title) > max_length:
+            return title[: max_length - 3] + "..."
+        return title
+
+    loglines = session_data.get("loglines", [])
+    for entry in loglines:
+        if entry.get("type") == "user":
+            msg = entry.get("message", {})
+            content = msg.get("content", "")
+            text = extract_text_from_content(content)
+            if text:
+                if len(text) > max_length:
+                    return text[: max_length - 3] + "..."
+                return text
+    return None
+
+
 def get_session_summary(filepath, max_length=200):
     """Extract a human-readable summary from a session file.
 
@@ -94,20 +120,9 @@ def get_session_summary(filepath, max_length=200):
         if filepath.suffix == ".jsonl":
             return _get_jsonl_summary(filepath, max_length)
         else:
-            # For JSON files, try to get first user message
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            loglines = data.get("loglines", [])
-            for entry in loglines:
-                if entry.get("type") == "user":
-                    msg = entry.get("message", {})
-                    content = msg.get("content", "")
-                    text = extract_text_from_content(content)
-                    if text:
-                        if len(text) > max_length:
-                            return text[: max_length - 3] + "..."
-                        return text
-            return "(no summary)"
+            return get_title_from_session_data(data, max_length) or "(no summary)"
     except Exception:
         return "(no summary)"
 
@@ -2111,7 +2126,7 @@ def web_cmd(
     if gist:
         # Inject gist preview JS and create gist
         inject_gist_preview_js(output)
-        session_title = session_data.get("title")
+        session_title = get_title_from_session_data(session_data)
         click.echo("Creating GitHub gist...")
         gist_id, gist_url = create_gist(output, title=session_title)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"

@@ -1060,6 +1060,59 @@ class TestImportGistOption:
         assert "gist.github.com" in result.output
         assert "gisthost.github.io" in result.output
 
+    def test_import_gist_creates_title_file(self, httpx_mock, monkeypatch, tmp_path):
+        """Test that web --gist creates a title .md file from the session data."""
+        from click.testing import CliRunner
+        from claude_code_transcripts import cli
+        import subprocess
+
+        # Load sample session to mock API response
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        with open(fixture_path) as f:
+            session_data = json.load(f)
+
+        httpx_mock.add_response(
+            url="https://api.anthropic.com/v1/session_ingress/session/test-session-id",
+            json=session_data,
+        )
+
+        captured_cmd = []
+
+        def mock_run(*args, **kwargs):
+            captured_cmd.extend(args[0])
+            return subprocess.CompletedProcess(
+                args=args[0],
+                returncode=0,
+                stdout="https://gist.github.com/testuser/def456\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        monkeypatch.setattr(
+            "claude_code_transcripts.tempfile.gettempdir", lambda: str(tmp_path)
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "web",
+                "test-session-id",
+                "--token",
+                "test-token",
+                "--org-uuid",
+                "test-org",
+                "--gist",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        # A .md title file should have been included in the gh command
+        md_files = [f for f in captured_cmd if f.endswith(".md")]
+        assert len(md_files) == 1, f"Expected 1 .md file in command, got: {md_files}"
+
 
 class TestVersionOption:
     """Tests for the --version option."""
