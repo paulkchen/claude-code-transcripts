@@ -1248,20 +1248,42 @@ def inject_gist_preview_js(output_dir):
             html_file.write_text(content, encoding="utf-8")
 
 
-def create_gist(output_dir, public=False):
+def _sanitize_filename(name):
+    """Sanitize a string for use as a filename."""
+    # Replace characters that are invalid in filenames
+    for ch in r'/<>:"\|?*':
+        name = name.replace(ch, "-")
+    # Collapse multiple dashes
+    while "--" in name:
+        name = name.replace("--", "-")
+    return name.strip(" -")
+
+
+def create_gist(output_dir, public=False, title=None):
     """Create a GitHub gist from the HTML files in output_dir.
 
     Returns the gist ID on success, or raises click.ClickException on failure.
+    If title is provided, creates a {title}.md file to name the gist.
     """
     output_dir = Path(output_dir)
     html_files = list(output_dir.glob("*.html"))
     if not html_files:
         raise click.ClickException("No HTML files found to upload to gist.")
 
+    # Create a title file to name the gist
+    title_file = None
+    if title:
+        safe_title = _sanitize_filename(title)
+        title_file = output_dir / f"{safe_title}.md"
+        title_file.write_text("Empty file to name gist")
+
     # Build the gh gist create command
     # gh gist create file1 file2 ... --public/--private
     cmd = ["gh", "gist", "create"]
-    cmd.extend(str(f) for f in sorted(html_files))
+    files = sorted(html_files)
+    if title_file:
+        files = [title_file] + files
+    cmd.extend(str(f) for f in files)
     if public:
         cmd.append("--public")
 
@@ -1534,7 +1556,9 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
 
     # Build choices for questionary
     choices = []
+    summary_by_path = {}
     for filepath, summary in results:
+        summary_by_path[filepath] = summary
         stat = filepath.stat()
         mod_time = datetime.fromtimestamp(stat.st_mtime)
         size_kb = stat.st_size / 1024
@@ -1555,6 +1579,7 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         return
 
     session_file = selected
+    session_title = summary_by_path.get(session_file)
 
     # Determine output directory and whether to open browser
     # If no -o specified, use temp dir and open browser by default
@@ -1584,7 +1609,7 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         # Inject gist preview JS and create gist
         inject_gist_preview_js(output)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_id, gist_url = create_gist(output, title=session_title)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1714,8 +1739,9 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
     if gist:
         # Inject gist preview JS and create gist
         inject_gist_preview_js(output)
+        session_title = get_session_summary(json_file_path)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_id, gist_url = create_gist(output, title=session_title)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -2085,8 +2111,9 @@ def web_cmd(
     if gist:
         # Inject gist preview JS and create gist
         inject_gist_preview_js(output)
+        session_title = session_data.get("title")
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_id, gist_url = create_gist(output, title=session_title)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
